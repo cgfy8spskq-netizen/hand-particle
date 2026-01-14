@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Hand Gesture Particle System</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<style>
+html,body{
+  margin:0; padding:0; overflow:hidden;
+  background:#0b0d12;
+  touch-action:none;
+}
+#ui{
+  position:fixed;top:12px;left:12px;
+  padding:10px 12px;
+  background:rgba(20,22,30,.75);
+  backdrop-filter:blur(10px);
+  border-radius:12px;
+  color:#fff;
+  font-size:12px;
+}
+#ui input{width:100%;}
+video{display:none;}
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div>🎛 Particle Color</div>
+  <input type="color" id="color" value="#44ccff">
+  <div style="margin-top:6px;opacity:.7">Dùng tay để điều khiển</div>
+</div>
+
+<video id="video" playsinline></video>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+/* ================= THREE ================= */
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,1,1000);
+camera.position.z=120;
+
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+document.body.appendChild(renderer.domElement);
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+/* ================= PARTICLES ================= */
+const COUNT=2200;
+let baseRadius=40,targetRadius=40;
+let mode="SPHERE",energy=0,plasma=false,colorShift=0;
+
+const dirs=[],pos=new Float32Array(COUNT*3);
+for(let i=0;i<COUNT;i++){
+  const u=Math.random(),v=Math.random();
+  const t=2*Math.PI*u,p=Math.acos(2*v-1);
+  const d=new THREE.Vector3(
+    Math.sin(p)*Math.cos(t),
+    Math.sin(p)*Math.sin(t),
+    Math.cos(p)
+  );
+  dirs.push(d);
+  pos.set([d.x*baseRadius,d.y*baseRadius,d.z*baseRadius],i*3);
+}
+
+const geo=new THREE.BufferGeometry();
+geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+const mat=new THREE.PointsMaterial({size:1.6,color:0x44ccff});
+const pts=new THREE.Points(geo,mat);
+scene.add(pts);
+
+/* ================= UI ================= */
+document.getElementById('color').oninput=e=>{
+  mat.color.set(e.target.value);
+};
+
+/* ================= HANDS ================= */
+const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+hands.setOptions({
+  maxNumHands:2,
+  modelComplexity:0,
+  minDetectionConfidence:.6,
+  minTrackingConfidence:.6
+});
+
+function ext(tip,pip){return tip.y<pip.y;}
+
+function gesture(lm){
+  const f=[
+    ext(lm[4],lm[3]),
+    ext(lm[8],lm[6]),
+    ext(lm[12],lm[10]),
+    ext(lm[16],lm[14]),
+    ext(lm[20],lm[18])
+  ];
+  const c=f.filter(x=>x).length;
+  if(c===0) return "FIST";
+  if(c===5) return "OPEN";
+  if(f[1]&&c===1) return "POINT";
+  if(f[1]&&f[2]&&c===2) return "V";
+  return "NONE";
+}
+
+hands.onResults(r=>{
+  if(!r.multiHandLandmarks) return;
+
+  plasma=r.multiHandLandmarks.length===2;
+
+  if(plasma){
+    const a=r.multiHandLandmarks[0][0];
+    const b=r.multiHandLandmarks[1][0];
+    targetRadius=THREE.MathUtils.clamp(Math.hypot(a.x-b.x,a.y-b.y)*300,30,100);
+  }
+
+  const g=gesture(r.multiHandLandmarks[0]);
+  if(g==="FIST") energy=1;
+  if(g==="OPEN") mode="EXPLODE";
+  if(g==="POINT") mode="ROTATE";
+  if(g==="V") colorShift=1;
+});
+
+new Camera(document.getElementById('video'),{
+  onFrame:async()=>{await hands.send({image:video});},
+  width:480,height:360
+}).start();
+
+/* ================= LOOP ================= */
+let t=0;
+function animate(){
+  requestAnimationFrame(animate);
+  t+=0.01;
+
+  baseRadius+= (targetRadius-baseRadius)*0.08;
+
+  const p=geo.attributes.position.array;
+  for(let i=0;i<COUNT;i++){
+    const d=dirs[i];
+    let r=baseRadius;
+
+    if(energy>0) r+=Math.sin(t*30+i)*2;
+    if(mode==="EXPLODE") r+=Math.sin(t*5+i)*6;
+    if(plasma) r+=Math.sin(t+i)*4;
+
+    p[i*3]=d.x*r;
+    p[i*3+1]=d.y*r;
+    p[i*3+2]=d.z*r;
+  }
+  geo.attributes.position.needsUpdate=true;
+
+  if(colorShift){
+    mat.color.offsetHSL(0.002,0,0);
+    colorShift*=0.95;
+  }
+
+  pts.rotation.y+=0.002;
+  pts.rotation.x+=0.001;
+  energy*=0.9;
+
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
