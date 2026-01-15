@@ -1,190 +1,155 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<meta charset="UTF-8">
-<title>Neon Hand Particle (Stable)</title>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
-<style>
-html,body{
-  margin:0;
-  overflow:hidden;
-  background:radial-gradient(circle at center,#12001f,#000);
-}
-#hint{
-  position:fixed;
-  top:10px;
-  left:50%;
-  transform:translateX(-50%);
-  color:#fff;
-  font-size:13px;
-  opacity:.85;
-  z-index:10;
-}
-video{display:none;}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Iron Man Gesture Interface</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #ui-layer { position: absolute; top: 20px; left: 20px; color: #00ffff; z-index: 10; pointer-events: none; text-shadow: 0 0 10px #00ffff; }
+        #video-preview { position: absolute; bottom: 20px; right: 20px; width: 130px; border: 1px solid #00ffff; border-radius: 10px; transform: scaleX(-1); opacity: 0.4; }
+        .status-box { background: rgba(0, 255, 255, 0.1); padding: 10px; border-left: 3px solid #00ffff; }
+    </style>
 </head>
 <body>
 
-<div id="hint">⏳ Khởi động camera…</div>
-<video id="video" playsinline></video>
+    <div id="ui-layer">
+        <div class="status-box">
+            <div id="mode-text" style="font-size: 24px; font-weight: bold;">INITIALIZING...</div>
+            <div id="zoom-text" style="font-size: 14px;">Zoom: 100%</div>
+        </div>
+    </div>
+    
+    <video id="video-preview" autoplay playsinline></video>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
-<script>
-/* ================= THREE ================= */
-const scene=new THREE.Scene();
-const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,1,1000);
-camera.position.z=120;
+    <script>
+        let scene, camera, renderer, particles, targetPositions;
+        let currentMode = 'sphere', currentScale = 1.0, targetScale = 1.0;
+        let followPoint = new THREE.Vector3();
+        const COUNT = 8000;
 
-const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true});
-renderer.setSize(innerWidth,innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-document.body.appendChild(renderer.domElement);
+        // 1. TẠO DỮ LIỆU HÌNH DẠNG
+        function generateShapes() {
+            const data = { sphere: [], heart: [], text: [] };
+            for (let i = 0; i < COUNT; i++) {
+                // Sphere
+                const phi = Math.acos(-1 + (2 * i) / COUNT);
+                const theta = Math.sqrt(COUNT * Math.PI) * phi;
+                data.sphere.push(200 * Math.cos(theta) * Math.sin(phi), 200 * Math.sin(theta) * Math.sin(phi), 200 * Math.cos(phi));
 
-addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
-});
+                // Heart
+                const t = Math.random() * Math.PI * 2;
+                const xH = 16 * Math.pow(Math.sin(t), 3);
+                const yH = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+                data.heart.push(xH * 12, yH * 12, (Math.random()-0.5)*50);
 
-/* ================= PARTICLES ================= */
-const COUNT=1800;
-const pos=new Float32Array(COUNT*3);
-const vel=[];
-const col=new Float32Array(COUNT*3);
-const c=new THREE.Color();
+                // Text "I LOVE YOU" (Giả lập vị trí các ký tự)
+                data.text.push((Math.random()-0.5)*800, (Math.random()-0.5)*200, (Math.random()-0.5)*100);
+            }
+            return data;
+        }
+        const SHAPES = generateShapes();
 
-for(let i=0;i<COUNT;i++){
-  pos.set([(Math.random()-.5)*60,(Math.random()-.5)*60,(Math.random()-.5)*20],i*3);
-  vel.push(new THREE.Vector3());
-  c.setHSL(Math.random(),1,.6);
-  col.set([c.r,c.g,c.b],i*3);
-}
+        // 2. KHỞI TẠO THREE.JS
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 5000);
+            camera.position.z = 1000;
 
-const geo=new THREE.BufferGeometry();
-geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
-geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
 
-const mat=new THREE.PointsMaterial({
-  size:1,
-  vertexColors:true,
-  transparent:true,
-  blending:THREE.AdditiveBlending,
-  opacity:.9
-});
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(COUNT * 3), 3));
+            geo.setAttribute('velocity', new THREE.BufferAttribute(new Float32Array(COUNT * 3), 3));
 
-const pts=new THREE.Points(geo,mat);
-scene.add(pts);
+            const mat = new THREE.PointsMaterial({
+                color: 0x00ffff, size: 2.5, transparent: true, blending: THREE.AdditiveBlending, opacity: 0.7
+            });
 
-/* ================= SHAPES ================= */
-let shape=0,targetScale=1;
-const flow=new THREE.Vector3();
+            particles = new THREE.Points(geo, mat);
+            scene.add(particles);
+        }
 
-function heart(i){
-  const t=i/COUNT*Math.PI*2;
-  return new THREE.Vector3(
-    16*Math.pow(Math.sin(t),3),
-    13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t),
-    (Math.random()-.5)*6
-  ).multiplyScalar(1.4);
-}
+        // 3. XỬ LÝ AI NHẬN DIỆN CỬ CHỈ
+        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6 });
 
-function flower(i){
-  const t=i/COUNT*Math.PI*8;
-  const r=18+6*Math.sin(6*t);
-  return new THREE.Vector3(Math.cos(t)*r,Math.sin(t)*r,(Math.random()-.5)*6);
-}
+        hands.onResults((res) => {
+            if (res.multiHandLandmarks && res.multiHandLandmarks[0]) {
+                const m = res.multiHandLandmarks[0];
+                
+                // ZOOM LOGIC (Cái - Út)
+                const zoomDist = Math.hypot(m[4].x - m[20].x, m[4].y - m[20].y);
+                targetScale = THREE.MathUtils.mapLinear(zoomDist, 0.1, 0.6, 0.3, 4.0);
+                document.getElementById('zoom-text').innerText = `Zoom: ${(targetScale * 100).toFixed(0)}%`;
 
-function saturn(i){
-  const t=i/COUNT*Math.PI*2;
-  const r=i%2?26:16;
-  return new THREE.Vector3(Math.cos(t)*r,Math.sin(t)*r,i%2?3:-3);
-}
+                // MODE LOGIC
+                const isIndex = m[8].y < m[6].y && m[12].y > m[10].y;
+                const isV = m[8].y < m[6].y && m[12].y < m[10].y && m[16].y > m[14].y;
+                const isFist = m[8].y > m[6].y && m[12].y > m[10].y;
+                const isPalm = m[8].y < m[6].y && m[20].y < m[18].y;
 
-function targetPos(i){
-  if(shape===0) return heart(i);
-  if(shape===1) return flower(i);
-  if(shape===2) return saturn(i);
-  return new THREE.Vector3();
-}
+                if (isV) { currentMode = 'heart'; document.getElementById('mode-text').innerText = "❤️ HEART MODE"; }
+                else if (isFist) { currentMode = 'sphere'; document.getElementById('mode-text').innerText = "🔋 ARC REACTOR"; }
+                else if (isPalm) { currentMode = 'text'; document.getElementById('mode-text').innerText = "💬 I LOVE YOU"; }
+                else if (isIndex) { 
+                    currentMode = 'follow'; 
+                    document.getElementById('mode-text').innerText = "🚀 FLIGHT CONTROL";
+                    followPoint.x = (0.5 - m[8].x) * 1500;
+                    followPoint.y = (0.5 - m[8].y) * 1000;
+                }
+            }
+        });
 
-/* ================= HAND TRACKING (NHẠY) ================= */
-const hint=document.getElementById('hint');
-const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        const cam = new Camera(document.getElementById('video-preview'), {
+            onFrame: async () => { await hands.send({image: document.getElementById('video-preview')}); },
+            width: 640, height: 480
+        });
+        cam.start();
 
-hands.setOptions({
-  maxNumHands:2,
-  modelComplexity:0,
-  minDetectionConfidence:0.3,
-  minTrackingConfidence:0.3
-});
+        // 4. VÒNG LẶP HIỆU ỨNG (ANIMATION)
+        function animate() {
+            requestAnimationFrame(animate);
+            const p = particles.geometry.attributes.position.array;
+            const v = particles.geometry.attributes.velocity.array;
+            const targetData = SHAPES[currentMode === 'follow' ? 'sphere' : currentMode];
+            
+            currentScale = THREE.MathUtils.lerp(currentScale, targetScale, 0.1);
 
-let lastSwitch=0;
+            for (let i = 0; i < COUNT; i++) {
+                const i3 = i * 3;
+                if (currentMode === 'follow') {
+                    // Hiệu ứng hạt bay tản theo ngón tay
+                    const speed = 0.04 + Math.random() * 0.02;
+                    v[i3] += (followPoint.x - p[i3]) * speed + (Math.random()-0.5)*12;
+                    v[i3+1] += (followPoint.y - p[i3+1]) * speed + (Math.random()-0.5)*12;
+                } else {
+                    // Biến hình & Zoom
+                    p[i3] += (targetData[i3] * currentScale - p[i3]) * 0.12;
+                    p[i3+1] += (targetData[i3+1] * currentScale - p[i3+1]) * 0.12;
+                    p[i3+2] += (targetData[i3+2] * currentScale - p[i3+2]) * 0.12;
+                }
+                p[i3] += v[i3]; p[i3+1] += v[i3+1];
+                v[i3] *= 0.82; v[i3+1] *= 0.82; // Ma sát lực
+            }
+            particles.geometry.attributes.position.needsUpdate = true;
+            particles.rotation.y += 0.005;
+            renderer.render(scene, camera);
+        }
 
-hands.onResults(r=>{
-  if(!r.multiHandLandmarks||!r.multiHandLandmarks.length){
-    hint.innerText="✋ Đưa tay vào khung camera";
-    flow.multiplyScalar(.9);
-    targetScale=1;
-    return;
-  }
-
-  hint.innerText="✅ Đã nhận diện tay";
-
-  const h=r.multiHandLandmarks[0];
-  const w=h[0], i=h[8];
-  const palm=Math.hypot(i.x-w.x,i.y-w.y);
-
-  targetScale=THREE.MathUtils.clamp(palm*4,.7,1.6);
-
-  flow.lerp(new THREE.Vector3(
-    (i.x-.5)*6,
-    -(i.y-.5)*6,
-    0
-  ),.25);
-
-  if(r.multiHandLandmarks.length===2 && Date.now()-lastSwitch>1200){
-    shape=(shape+1)%3;
-    lastSwitch=Date.now();
-  }
-});
-
-/* ================= CAMERA ================= */
-const video=document.getElementById('video');
-
-new Camera(video,{
-  onFrame:async()=>hands.send({image:video}),
-  width:320,
-  height:240
-}).start();
-
-/* ================= LOOP ================= */
-function animate(){
-  requestAnimationFrame(animate);
-  const p=geo.attributes.position.array;
-
-  for(let i=0;i<COUNT;i++){
-    const idx=i*3;
-    const tp=targetPos(i).multiplyScalar(targetScale);
-
-    vel[i].x+=(tp.x-p[idx])*.002+flow.x*.01;
-    vel[i].y+=(tp.y-p[idx+1])*.002+flow.y*.01;
-    vel[i].z+=(tp.z-p[idx+2])*.002;
-
-    vel[i].multiplyScalar(.92);
-
-    p[idx]+=vel[i].x;
-    p[idx+1]+=vel[i].y;
-    p[idx+2]+=vel[i].z;
-  }
-
-  geo.attributes.position.needsUpdate=true;
-  pts.rotation.y+=.002;
-  renderer.render(scene,camera);
-}
-animate();
-</script>
+        init(); animate();
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
