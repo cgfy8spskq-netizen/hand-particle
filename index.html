@@ -1,106 +1,169 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
-    <title>3D Gesture Control</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Particles - Advanced Gestures</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; }
-        canvas { display: block; }
-        #video-container { position: absolute; bottom: 10px; right: 10px; width: 150px; border-radius: 10px; overflow: hidden; border: 2px solid white; z-index: 10; }
-        #input-video { width: 100%; transform: scaleX(-1); }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; background: rgba(255,255,255,0.1); 
+               backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; z-index: 100; border: 1px solid rgba(255,255,255,0.2); }
+        #video-preview { position: absolute; bottom: 20px; right: 20px; width: 150px; border: 2px solid #fff; border-radius: 12px; transform: scaleX(-1); opacity: 0.7; }
+        .gesture-hint { font-size: 13px; color: #00ffff; margin-top: 5px; }
+        input[type="color"] { border: none; width: 30px; height: 30px; cursor: pointer; background: none; }
     </style>
 </head>
 <body>
-    <div id="video-container">
-        <video id="input-video" playsinline></video>
-    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <div id="ui">
+        <h2 style="margin:0 0 10px 0;">Magic Particles</h2>
+        <input type="color" id="particleColor" value="#00ffff"> <span>Chỉnh màu nền</span>
+        <div id="status" style="font-weight: bold; color: #ffeb3b; margin: 10px 0;">Đang đợi tay...</div>
+        <div class="gesture-hint">☝️ Chỉ tay: Hút hạt theo ngón</div>
+        <div class="gesture-hint">✊ Nắm tay: Hố đen & Nổ tung</div>
+        <div class="gesture-hint">✌️ Chữ V: Chế độ Cầu vồng</div>
+    </div>
+    
+    <video id="video-preview" autoplay playsinline></video>
+
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script>
-        let scene, camera, renderer, particles;
-        const videoElement = document.getElementById('input-video');
+        let scene, camera, renderer, particles, clock;
+        let mode = 'idle'; // idle, attract, fist, rainbow
+        let targetPoint = new THREE.Vector3();
+        const PARTICLE_COUNT = 8000;
 
-        // 1. Khởi tạo Three.js (Hệ thống hạt)
         function initThree() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 3000);
+            camera.position.z = 800;
+            clock = new THREE.Clock();
+
+            renderer = new THREE.WebGLRenderer({ antialias: false });
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             document.body.appendChild(renderer.domElement);
 
-            const geometry = new THREE.BufferGeometry();
-            const vertices = [];
-            for (let i = 0; i < 5000; i++) {
-                vertices.push(THREE.MathUtils.randFloatSpread(2000), THREE.MathUtils.randFloatSpread(2000), THREE.MathUtils.randFloatSpread(2000));
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(PARTICLE_COUNT * 3);
+            const vel = new Float32Array(PARTICLE_COUNT * 3);
+            const colors = new Float32Array(PARTICLE_COUNT * 3);
+
+            for(let i=0; i<PARTICLE_COUNT*3; i++) {
+                pos[i] = (Math.random() - 0.5) * 1500;
+                vel[i] = (Math.random() - 0.5) * 2;
+                colors[i] = Math.random();
             }
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 5 });
-            particles = new THREE.Points(geometry, material);
+
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('velocity', new THREE.BufferAttribute(vel, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const mat = new THREE.PointsMaterial({
+                size: 3,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending
+            });
+
+            particles = new THREE.Points(geo, mat);
             scene.add(particles);
-            camera.position.z = 500;
         }
 
-        // 2. Nhận diện cử chỉ từ MediaPipe
-        const hands = new Hands({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-        });
+        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.6 });
 
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.7
-        });
-
-        hands.onResults((results) => {
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const landmarks = results.multiHandLandmarks[0];
+        hands.onResults((res) => {
+            const status = document.getElementById('status');
+            if (res.multiHandLandmarks && res.multiHandLandmarks[0]) {
+                const marks = res.multiHandLandmarks[0];
                 
-                // Logic nhận diện cử chỉ cơ bản:
-                // Nếu khoảng cách giữa ngón cái và ngón trỏ nhỏ -> Pinch (Thu nhỏ/Gom hạt)
-                const thumbTip = landmarks[4];
-                const indexTip = landmarks[8];
-                const dist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+                // 1. Kiểm tra Cử chỉ
+                const isIndexUp = marks[8].y < marks[6].y;
+                const isMiddleUp = marks[12].y < marks[10].y;
+                const isFist = marks[8].y > marks[6].y && marks[12].y > marks[10].y;
 
-                if (dist < 0.05) {
-                    particles.scale.set(0.5, 0.5, 0.5); // Hiệu ứng co lại
-                    particles.material.color.setHex(0xff0000);
+                if (isFist) {
+                    mode = 'fist';
+                    status.innerText = "✊ BLACK HOLE MODE";
+                } else if (isIndexUp && isMiddleUp) {
+                    mode = 'rainbow';
+                    status.innerText = "✌️ DISCO MODE";
+                } else if (isIndexUp) {
+                    mode = 'attract';
+                    status.innerText = "☝️ ATTRACT MODE";
+                    // Chuyển tọa độ ngón tay sang không gian 3D
+                    targetPoint.x = (0.5 - marks[8].x) * 1500;
+                    targetPoint.y = (0.5 - marks[8].y) * 1000;
                 } else {
-                    particles.scale.set(1, 1, 1);
-                    particles.material.color.setHex(0x00ffff);
+                    mode = 'idle';
+                    status.innerText = "🖐 ĐANG ĐỢI...";
                 }
-                
-                // Di chuyển hệ thống hạt theo tay
-                particles.rotation.y = thumbTip.x * Math.PI;
-                particles.rotation.x = thumbTip.y * Math.PI;
             }
         });
 
-        // 3. Khởi chạy Camera
-        async function startCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-            videoElement.srcObject = stream;
-            videoElement.play();
-
-            async function detectionLoop() {
-                await hands.send({ image: videoElement });
-                requestAnimationFrame(detectionLoop);
-            }
-            detectionLoop();
-        }
+        const cam = new Camera(document.getElementById('video-preview'), {
+            onFrame: async () => { await hands.send({image: document.getElementById('video-preview')}); },
+            width: 640, height: 480
+        });
+        cam.start();
 
         function animate() {
             requestAnimationFrame(animate);
-            particles.rotation.z += 0.001;
+            const positions = particles.geometry.attributes.position.array;
+            const velocities = particles.geometry.attributes.velocity.array;
+            const colors = particles.geometry.attributes.color.array;
+            const time = clock.getElapsedTime();
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const i3 = i * 3;
+
+                if (mode === 'attract') {
+                    // Hút về phía ngón tay
+                    velocities[i3] += (targetPoint.x - positions[i3]) * 0.002;
+                    velocities[i3+1] += (targetPoint.y - positions[i3+1]) * 0.002;
+                } else if (mode === 'fist') {
+                    // Hố đen tại tâm
+                    velocities[i3] += (0 - positions[i3]) * 0.02;
+                    velocities[i3+1] += (0 - positions[i3+1]) * 0.02;
+                } else if (mode === 'rainbow') {
+                    // Nhảy múa ngẫu nhiên
+                    velocities[i3] += Math.sin(time + i) * 0.5;
+                    velocities[i3+1] += Math.cos(time + i) * 0.5;
+                    // Đổi màu
+                    colors[i3] = Math.sin(time * 2);
+                    colors[i3+1] = Math.cos(time * 3);
+                }
+
+                // Cập nhật vị trí & Ma sát (Friction)
+                positions[i3] += velocities[i3];
+                positions[i3+1] += velocities[i3+1];
+                velocities[i3] *= 0.95;
+                velocities[i3+1] *= 0.95;
+
+                // Giữ hạt trong màn hình
+                if(Math.abs(positions[i3]) > 1000) positions[i3] *= -0.9;
+                if(Math.abs(positions[i3+1]) > 1000) positions[i3+1] *= -0.9;
+            }
+
+            particles.geometry.attributes.position.needsUpdate = true;
+            if(mode === 'rainbow') particles.geometry.attributes.color.needsUpdate = true;
+            
+            particles.rotation.y += 0.001;
             renderer.render(scene, camera);
         }
 
         initThree();
-        startCamera();
         animate();
+
+        // Xử lý đổi màu nền
+        document.getElementById('particleColor').addEventListener('input', (e) => {
+            renderer.setClearColor(e.target.value);
+        });
     </script>
 </body>
 </html>
-
