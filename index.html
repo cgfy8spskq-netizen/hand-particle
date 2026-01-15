@@ -3,32 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>3D Particle - Hand Gesture (iPhone Optimized)</title>
+  <title>3D Particle Hand Gesture - iPhone Fixed</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; font-family: Arial; touch-action: none; }
-    #video { position: absolute; top: 10px; left: 10px; width: 200px; height: 150px; border: 2px solid #0f0; z-index: 10; opacity: 0.6; }
-    #info { position: absolute; bottom: 10px; left: 10px; right: 10px; color: white; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; z-index: 10; font-size: 14px; text-align: center; }
+    #video { position: absolute; top: 10px; left: 10px; width: 180px; height: 240px; border: 2px solid #0f0; z-index: 10; opacity: 0.7; transform: scaleX(-1); } /* Mirror cho giống gương */
+    #info { position: absolute; bottom: 20px; left: 10px; right: 10px; color: white; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 10px; z-index: 10; font-size: 15px; text-align: center; }
     canvas { display: block; }
   </style>
 </head>
 <body>
-  <video id="video" autoplay playsinline></video>
-  <div id="info">Trên iPhone: Cho phép camera → Đưa tay vào khung • Mở tay: mở rộng • Nắm tay: thu nhỏ + đổi màu • Chỉ trỏ: đổi kiểu • Giơ 2 ngón: xoay nhanh • Ngón cái: bùng nổ • Nghiêng tay: di chuyển</div>
+  <video id="video" autoplay playsinline muted></video>
+  <div id="info">Trên iPhone: Cho phép camera → Đưa tay vào khung (ngược lại vì mirror) • Mở tay: mở rộng • Nắm tay: thu nhỏ + đổi màu • Chỉ trỏ: đổi kiểu particle • Giơ ngón cái: bùng nổ</div>
 
   <!-- Three.js -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.min.js"></script>
 
-  <!-- Optional Bloom - chỉ bật nếu không lag -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/postprocessing/EffectComposer.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/postprocessing/RenderPass.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/postprocessing/UnrealBloomPass.js"></script>
+  <!-- MediaPipe Tasks Vision (phiên bản mới, tốt cho iOS) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js"></script>
 
-  <!-- MediaPipe -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+  <script type="module">
+    const { HandLandmarker, FilesetResolver, DrawingUtils } = window.vision;
 
-  <script>
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
     // ==================== Three.js Setup ====================
@@ -40,116 +35,86 @@
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Giảm chất lượng trên mobile
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     document.body.appendChild(renderer.domElement);
 
-    // Bloom chỉ bật nếu không phải iOS (hoặc test)
-    let composer = null;
-    let bloomPass = null;
-    if (!isIOS) {
-      composer = new THREE.EffectComposer(renderer);
-      const renderPass = new THREE.RenderPass(scene, camera);
-      composer.addPass(renderPass);
-      bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.6);
-      bloomPass.threshold = 0.2;
-      bloomPass.strength = 1.0;
-      bloomPass.radius = 0.5;
-      composer.addPass(bloomPass);
-    }
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const pointLight = new THREE.PointLight(0xffffff, 1.2);
-    scene.add(pointLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    scene.add(new THREE.PointLight(0xffffff, 1.2));
 
     // ==================== Particle ====================
-    let particles, particleGeometry, particleMaterial;
-    const particleCount = isIOS ? 5000 : 10000; // Giảm trên iOS
+    let particles, geometry, material;
+    const count = isIOS ? 4000 : 8000;
     let currentTemplate = 0;
     const templates = ['default', 'hearts', 'flowers', 'saturn', 'fireworks'];
     let velocities = [];
-    let particleTargetPosition = new THREE.Vector3();
+    let targetPos = new THREE.Vector3();
 
     function createParticles() {
       if (particles) scene.remove(particles);
 
-      particleGeometry = new THREE.BufferGeometry();
-      const positions = new Float32Array(particleCount * 3);
-      const colors = new Float32Array(particleCount * 3);
-      const sizes = new Float32Array(particleCount);
+      geometry = new THREE.BufferGeometry();
+      const pos = new Float32Array(count * 3);
+      const col = new Float32Array(count * 3);
+      const size = new Float32Array(count);
+
       velocities = [];
 
-      for (let i = 0; i < particleCount; i++) {
+      for (let i = 0; i < count; i++) {
         let x = (Math.random() - 0.5) * 60;
         let y = (Math.random() - 0.5) * 60;
         let z = (Math.random() - 0.5) * 60;
 
-        // Giữ nguyên logic shape như cũ (hearts, flowers, etc.)
-        if (currentTemplate === 1) { // hearts
-          const angle = Math.random() * Math.PI * 2;
-          x = 12 * Math.pow(Math.sin(angle), 3);
-          y = 10 * Math.cos(angle) - 4 * Math.cos(2*angle) - 2 * Math.cos(3*angle) - Math.cos(4*angle);
-        } // ... (giữ nguyên các template khác)
+        // Simple shapes (giữ nguyên ý tưởng)
+        if (currentTemplate === 1) { x = 12 * Math.pow(Math.sin(i * 0.1), 3); y = 10 * Math.cos(i * 0.1); }
+        // ... thêm shape khác nếu cần
 
-        positions[i * 3] = x;
-        positions[i * 3 + 1] = y;
-        positions[i * 3 + 2] = z;
+        pos[i*3] = x; pos[i*3+1] = y; pos[i*3+2] = z;
 
-        const hue = i / particleCount + Math.random() * 0.1;
-        colors[i * 3] = hue;
-        colors[i * 3 + 1] = 0.9;
-        colors[i * 3 + 2] = 0.7;
-        sizes[i] = 1.2 + Math.random() * 2;
+        const hue = i / count;
+        col[i*3] = hue; col[i*3+1] = 0.9; col[i*3+2] = 0.7;
+        size[i] = 1.5 + Math.random() * 2;
 
-        velocities.push(new THREE.Vector3((Math.random() - 0.5)*0.03, (Math.random() - 0.5)*0.03, (Math.random() - 0.5)*0.03));
+        velocities.push(new THREE.Vector3((Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02));
       }
 
-      particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage));
-      particleGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+      geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
+      geometry.setAttribute('size', new THREE.BufferAttribute(size, 1));
 
-      particleMaterial = new THREE.PointsMaterial({
+      material = new THREE.PointsMaterial({
         vertexColors: true,
-        size: 1.0,
+        size: 1.2,
         transparent: true,
         opacity: 0.9,
         blending: THREE.AdditiveBlending,
         depthWrite: false
       });
 
-      particles = new THREE.Points(particleGeometry, particleMaterial);
+      particles = new THREE.Points(geometry, material);
       scene.add(particles);
     }
-
     createParticles();
 
-    let clock = new THREE.Clock();
     function animate() {
       requestAnimationFrame(animate);
-      const delta = clock.getDelta();
 
       if (particles) {
-        particles.rotation.y += 0.001 * delta * 60;
-        particles.rotation.x += 0.0005 * delta * 60;
+        particles.rotation.y += 0.001;
 
-        const positions = particleGeometry.attributes.position.array;
-        for (let i = 0; i < particleCount; i++) {
-          positions[i * 3] += velocities[i].x * delta * 60;
-          positions[i * 3 + 1] += velocities[i].y * delta * 60;
-          positions[i * 3 + 2] += velocities[i].z * delta * 60;
+        const positions = geometry.attributes.position.array;
+        for (let i = 0; i < count; i++) {
+          positions[i*3] += velocities[i].x;
+          positions[i*3+1] += velocities[i].y;
+          positions[i*3+2] += velocities[i].z;
 
-          // Attract to target
-          const dx = particleTargetPosition.x - positions[i * 3];
-          velocities[i].x += dx * 0.00008 * delta * 60;
-          // Tương tự cho y, z...
-
-          // Bound
-          if (Math.abs(positions[i * 3]) > 80) velocities[i].x *= -0.7;
+          const dx = targetPos.x - positions[i*3];
+          velocities[i].x += dx * 0.00005;
+          // y,z tương tự nếu cần
         }
-        particleGeometry.attributes.position.needsUpdate = true;
+        geometry.attributes.position.needsUpdate = true;
       }
 
-      if (composer) composer.render();
-      else renderer.render(scene, camera);
+      renderer.render(scene, camera);
     }
     animate();
 
@@ -157,87 +122,97 @@
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
-      if (composer) composer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // ==================== MediaPipe ====================
-    const videoElement = document.getElementById('video');
-    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`});
+    // ==================== MediaPipe HandLandmarker (new API) ====================
+    let handLandmarker;
+    let running = false;
 
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: 0,          // Giảm complexity cho iOS
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-
-    hands.onResults(onResults);
-
-    const cameraFeed = new Camera(videoElement, {
-      onFrame: async () => {
-        await hands.send({image: videoElement});
-      },
-      width: isIOS ? 320 : 480,
-      height: isIOS ? 240 : 360
-    });
-    cameraFeed.start().catch(err => {
-      console.error("Camera error:", err);
-      alert("Không truy cập được camera. Hãy thử HTTPS và cho phép camera trong Safari.");
-    });
-
-    let lastGestureTime = 0;
-    function onResults(results) {
-      if (!results.multiHandLandmarks) return;
-
-      const hand = results.multiHandLandmarks[0];
-      const now = Date.now();
-      if (now - lastGestureTime < 400) return; // Debounce nhanh hơn
-
-      const wrist = hand[0];
-      const thumbTip = hand[4];
-      const indexTip = hand[8];
-      const middleTip = hand[12];
-      const ringTip = hand[16];
-      const pinkyTip = hand[20];
-
-      // Cử chỉ (giữ nguyên nhưng điều chỉnh threshold nhẹ cho iOS)
-      const isOpenPalm = thumbTip.y < wrist.y && indexTip.y < wrist.y && Math.abs(thumbTip.x - pinkyTip.x) > 0.08;
-      const isFist = thumbTip.y > indexTip.y && indexTip.y > middleTip.y;
-      const isIndexUp = indexTip.y < thumbTip.y && indexTip.y < middleTip.y && indexTip.y < ringTip.y;
-      const isTwoFingers = indexTip.y < wrist.y && middleTip.y < wrist.y && ringTip.y > middleTip.y;
-      const isThumbUp = thumbTip.y < wrist.y && indexTip.y > thumbTip.y && middleTip.y > thumbTip.y;
-
-      const handTiltX = (wrist.x - 0.5) * 150;
-      const handTiltY = (wrist.y - 0.5) * -150;
-
-      if (isOpenPalm) {
-        particleMaterial.size = THREE.MathUtils.lerp(particleMaterial.size, 2.8, 0.12);
-        if (bloomPass) bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, 1.4, 0.1);
-      } else if (isFist) {
-        particleMaterial.size = THREE.MathUtils.lerp(particleMaterial.size, 0.6, 0.15);
-        const colors = particleGeometry.attributes.color.array;
-        for (let i = 0; i < particleCount; i += 3) {
-          colors[i] = Math.random();
-          colors[i+1] = 0.8 + Math.random()*0.2;
-          colors[i+2] = 0.6 + Math.random()*0.4;
-        }
-        particleGeometry.attributes.color.needsUpdate = true;
-      } else if (isIndexUp) {
-        currentTemplate = (currentTemplate + 1) % templates.length;
-        createParticles();
-      } else if (isTwoFingers) {
-        // Xoay nhanh hơn
-        particles.rotation.y += 0.05;
-      } else if (isThumbUp) {
-        currentTemplate = 4;
-        createParticles();
-        velocities.forEach(v => v.multiplyScalar(2));
-      }
-
-      particleTargetPosition.set(handTiltX, handTiltY, 0);
-
-      lastGestureTime = now;
+    async function createHandLandmarker() {
+      const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task` },
+        runningMode: "VIDEO",
+        numHands: 1,
+        minHandDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      console.log("HandLandmarker ready!");
     }
+
+    const video = document.getElementById('video');
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          running = true;
+          predictWebcam();
+        };
+      } catch (err) {
+        console.error("Camera error:", err);
+        alert("Không mở camera được. Kiểm tra: HTTPS? Cho phép camera trong Settings > Safari?");
+      }
+    }
+
+    let lastVideoTime = -1;
+    async function predictWebcam() {
+      if (running && video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        const results = await handLandmarker.detectForVideo(video, performance.now());
+
+        if (results.landmarks && results.landmarks.length > 0) {
+          const landmarks = results.landmarks[0];
+
+          // Landmarks: 0=wrist, 4=thumb tip, 8=index tip, 12=middle, 16=ring, 20=pinky
+          const wrist = landmarks[0];
+          const thumb = landmarks[4];
+          const index = landmarks[8];
+          const middle = landmarks[12];
+
+          // Cử chỉ đơn giản (dễ detect hơn)
+          const isOpen = index.y < wrist.y && middle.y < wrist.y && Math.abs(thumb.x - index.x) > 0.05;
+          const isFist = thumb.y > index.y && index.y > middle.y;
+          const isIndexUp = index.y < thumb.y && index.y < middle.y && index.y < landmarks[16].y;
+          const isThumbUp = thumb.y < wrist.y && index.y > thumb.y;
+
+          const tiltX = (wrist.x - 0.5) * 150;
+          const tiltY = (wrist.y - 0.5) * -150;
+
+          if (isOpen) {
+            material.size = THREE.MathUtils.lerp(material.size, 3.0, 0.1);
+          } else if (isFist) {
+            material.size = THREE.MathUtils.lerp(material.size, 0.5, 0.15);
+            const colors = geometry.attributes.color.array;
+            for (let i = 0; i < colors.length; i += 3) {
+              colors[i] = Math.random();
+              colors[i+1] = 0.8 + Math.random()*0.2;
+            }
+            geometry.attributes.color.needsUpdate = true;
+          } else if (isIndexUp) {
+            currentTemplate = (currentTemplate + 1) % templates.length;
+            createParticles();
+          } else if (isThumbUp) {
+            currentTemplate = 4;
+            createParticles();
+            velocities.forEach(v => v.multiplyScalar(1.8));
+          }
+
+          targetPos.set(tiltX, tiltY, 0);
+        }
+      }
+      if (running) requestAnimationFrame(predictWebcam);
+    }
+
+    // Init
+    createHandLandmarker().then(() => {
+      startCamera();
+    }).catch(err => {
+      console.error("Init error:", err);
+      alert("Lỗi khởi tạo MediaPipe. Kiểm tra kết nối hoặc thử browser khác.");
+    });
   </script>
 </body>
 </html>
