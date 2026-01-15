@@ -1,157 +1,217 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<meta charset="UTF-8">
-<title>Heart Particle Gesture</title>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
-<style>
-html,body{
-  margin:0; padding:0; overflow:hidden;
-  background:radial-gradient(circle,#2b0f1f,#050008);
-}
-#hint{
-  position:fixed;
-  bottom:14px; left:50%;
-  transform:translateX(-50%);
-  font-size:12px;
-  color:#fff; opacity:.7;
-}
-video{display:none;}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>3D Particle System - Hand Gesture Control (Three.js + MediaPipe)</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; font-family: Arial; }
+    #video { position: absolute; top: 10px; left: 10px; width: 240px; height: 180px; border: 2px solid #0f0; z-index: 10; opacity: 0.7; }
+    #info { position: absolute; top: 10px; right: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; z-index: 10; }
+    canvas { display: block; }
+  </style>
 </head>
 <body>
+  <video id="video" autoplay playsinline></video>
+  <div id="info">Đưa tay vào khung hình • Mở tay: mở rộng • Nắm tay: thu nhỏ + đổi màu • Chỉ ngón trỏ: đổi kiểu particle</div>
 
-<div id="hint">✋ Đưa tay trước camera</div>
-<video id="video" playsinline></video>
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.min.js"></script>
+  <!-- MediaPipe Hands (runtime nhẹ, chạy tốt trên web) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script>
+    // ==================== Three.js Setup ====================
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a1f);
 
-<script>
-/* ================= THREE ================= */
-const scene=new THREE.Scene();
-const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,1,1000);
-camera.position.z=120;
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera.position.set(0, 0, 80);
 
-const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
-renderer.setSize(innerWidth,innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-document.body.appendChild(renderer.domElement);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
-});
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const pointLight = new THREE.PointLight(0xffffff, 1.2);
+    pointLight.position.set(10, 20, 30);
+    scene.add(pointLight);
 
-/* ================= HEART PARTICLES ================= */
-const COUNT=1600;
-let scale=1,targetScale=1,beat=0,spark=0;
-let flowX=0,flowY=0;
+    // ==================== Particle System ====================
+    let particles, particleGeometry, particleMaterial;
+    const particleCount = 8000;
+    let currentTemplate = 0; // 0: default (sphere), 1: hearts, 2: flowers, 3: saturn, 4: fireworks
+    const templates = ['default', 'hearts', 'flowers', 'saturn', 'fireworks'];
 
-const basePos=[],pos=new Float32Array(COUNT*3);
+    function createParticles() {
+      if (particles) scene.remove(particles);
 
-function heart(t){
-  return {
-    x:16*Math.sin(t)**3,
-    y:13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t)
-  };
-}
+      particleGeometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(particleCount * 3);
+      const colors = new Float32Array(particleCount * 3);
+      const sizes = new Float32Array(particleCount);
 
-for(let i=0;i<COUNT;i++){
-  const t=Math.random()*Math.PI*2;
-  const h=heart(t);
-  const z=(Math.random()-.5)*6;
-  const v=new THREE.Vector3(h.x,h.y,z).normalize();
-  basePos.push(v);
-  pos.set([v.x*25,v.y*25,v.z*25],i*3);
-}
+      for (let i = 0; i < particleCount; i++) {
+        let x = (Math.random() - 0.5) * 60;
+        let y = (Math.random() - 0.5) * 60;
+        let z = (Math.random() - 0.5) * 60;
 
-const geo=new THREE.BufferGeometry();
-geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+        // Simple shape variation based on template
+        if (currentTemplate === 1) { // hearts (approximation)
+          const angle = Math.random() * Math.PI * 2;
+          const r = 0.3 + Math.random() * 0.4;
+          x = Math.cos(angle) * r * 12;
+          y = Math.sin(angle * 3) * r * 8 - 4;
+          z = (Math.random() - 0.5) * 10;
+        } else if (currentTemplate === 2) { // flowers (petals)
+          const petal = Math.floor(Math.random() * 6);
+          const angle = petal * Math.PI / 3 + Math.random() * 0.5;
+          x = Math.cos(angle) * 18;
+          y = Math.sin(angle) * 18;
+          z = (Math.random() - 0.5) * 8;
+        } else if (currentTemplate === 3) { // saturn rings
+          const ring = Math.random() > 0.5 ? 1 : -1;
+          const dist = 18 + Math.random() * 12;
+          const angle = Math.random() * Math.PI * 2;
+          x = Math.cos(angle) * dist;
+          y = 0;
+          z = Math.sin(angle) * dist * ring * 0.2;
+        } else if (currentTemplate === 4) { // fireworks burst
+          const radius = Math.random() * 25;
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          x = radius * Math.sin(phi) * Math.cos(theta);
+          y = radius * Math.sin(phi) * Math.sin(theta);
+          z = radius * Math.cos(phi);
+        }
 
-const mat=new THREE.PointsMaterial({
-  color:0xff5c8a,
-  size:1,
-  transparent:true,
-  opacity:.9
-});
+        positions[i * 3]     = x;
+        positions[i * 3 + 1] = y;
+        positions[i * 3 + 2] = z;
 
-const pts=new THREE.Points(geo,mat);
-scene.add(pts);
+        // Random color
+        const hue = Math.random();
+        colors[i * 3]     = hue;
+        colors[i * 3 + 1] = 1;
+        colors[i * 3 + 2] = 1;
+        sizes[i] = 1.8 + Math.random() * 2.5;
+      }
 
-/* ================= HAND TRACKING (DỄ) ================= */
-const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-hands.setOptions({
-  maxNumHands:2,
-  modelComplexity:0,
-  minDetectionConfidence:.5,
-  minTrackingConfidence:.5
-});
+      particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      particleGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
-hands.onResults(r=>{
-  if(!r.multiHandLandmarks||r.multiHandLandmarks.length===0){
-    targetScale=1;
-    flowX*=.9; flowY*=.9;
-    return;
-  }
+      particleMaterial = new THREE.PointsMaterial({
+        vertexColors: true,
+        size: 0.8,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
 
-  const hand=r.multiHandLandmarks[0];
-  const wrist=hand[0];
-  const indexTip=hand[8];
-  const indexBase=hand[6];
+      particles = new THREE.Points(particleGeometry, particleMaterial);
+      scene.add(particles);
+    }
 
-  const palm=Math.hypot(indexTip.x-wrist.x,indexTip.y-wrist.y);
-  targetScale=THREE.MathUtils.clamp(palm*4,.8,1.6);
+    createParticles();
 
-  if(palm<.12) beat=1;
-  if(palm>.18) spark=1;
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
 
-  // 1 ngón → hướng
-  const dx=indexTip.x-indexBase.x;
-  const dy=indexTip.y-indexBase.y;
-  flowX+=dx*0.5;
-  flowY+=-dy*0.5;
+      if (particles) {
+        particles.rotation.y += 0.001;
+        particles.rotation.x += 0.0005;
+      }
 
-  if(r.multiHandLandmarks.length===2) spark=1.5;
-});
+      renderer.render(scene, camera);
+    }
+    animate();
 
-new Camera(document.getElementById('video'),{
-  onFrame:async()=>{await hands.send({image:video});},
-  width:480,height:360
-}).start();
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 
-/* ================= LOOP ================= */
-let t=0;
-function animate(){
-  requestAnimationFrame(animate);
-  t+=0.02;
+    // ==================== MediaPipe Hands Setup ====================
+    const videoElement = document.getElementById('video');
+    const hands = new Hands({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`;
+    }});
 
-  scale+=(targetScale-scale)*0.08;
-  beat*=.9; spark*=.9;
-  flowX*=.95; flowY*=.95;
+    hands.setOptions({
+      maxNumHands: 1,           // Chỉ theo dõi 1 tay để dễ detect cử chỉ
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.5
+    });
 
-  const p=geo.attributes.position.array;
-  for(let i=0;i<COUNT;i++){
-    const v=basePos[i];
-    let r=25*scale;
+    hands.onResults(onResults);
 
-    if(beat) r+=Math.sin(t*20+i)*2;
-    if(spark) r+=Math.sin(t*5+i)*3;
+    const cameraFeed = new Camera(videoElement, {
+      onFrame: async () => {
+        await hands.send({image: videoElement});
+      },
+      width: 480,
+      height: 360
+    });
+    cameraFeed.start();
 
-    p[i*3]=v.x*r+flowX*10;
-    p[i*3+1]=v.y*r+flowY*10;
-    p[i*3+2]=v.z*r;
-  }
-  geo.attributes.position.needsUpdate=true;
+    function onResults(results) {
+      // Clear previous drawings if you want overlay landmarks (optional)
+      // const canvasElement = ... (nếu muốn vẽ landmark lên video)
 
-  mat.color.offsetHSL(0.001,0,0);
-  pts.rotation.y+=0.002;
+      if (results.multiHandLandmarks && results.multiHandedness) {
+        const hand = results.multiHandLandmarks[0];
+        const handedness = results.multiHandedness[0].label; // Left or Right
 
-  renderer.render(scene,camera);
-}
-animate();
-</script>
+        // Cử chỉ đơn giản dễ nắm bắt
+        const thumbTip   = hand[4];
+        const indexTip   = hand[8];
+        const middleTip  = hand[12];
+        const ringTip    = hand[16];
+        const pinkyTip   = hand[20];
+
+        const isFist = 
+          thumbTip.y > indexTip.y && 
+          indexTip.y > middleTip.y && 
+          middleTip.y > ringTip.y && 
+          ringTip.y > pinkyTip.y; // Ngón tay co lại
+
+        const isIndexUp = 
+          indexTip.y < thumbTip.y && 
+          indexTip.y < middleTip.y && 
+          indexTip.y < ringTip.y && 
+          indexTip.y < pinkyTip.y && 
+          Math.abs(indexTip.x - middleTip.x) > 0.03; // Chỉ ngón trỏ dựng
+
+        const isOpenPalm = 
+          !isFist && 
+          Math.abs(thumbTip.x - indexTip.x) > 0.05 && 
+          Math.abs(indexTip.y - pinkyTip.y) < 0.15; // Tay mở
+
+        // Control particles
+        if (isOpenPalm) {
+          // Mở rộng
+          particleMaterial.size = THREE.MathUtils.lerp(particleMaterial.size, 2.8, 0.15);
+        } else if (isFist) {
+          // Thu nhỏ + random color
+          particleMaterial.size = THREE.MathUtils.lerp(particleMaterial.size, 0.4, 0.2);
+          particleMaterial.color.setHSL(Math.random(), 0.9, 0.7);
+        } else if (isIndexUp) {
+          // Chuyển template
+          currentTemplate = (currentTemplate + 1) % templates.length;
+          createParticles(); // Tạo lại particle với shape mới
+          console.log("Template:", templates[currentTemplate]);
+        }
+      }
+    }
+  </script>
 </body>
 </html>
