@@ -3,27 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Iron Man - I LOVE YOU Edition</title>
+    <title>Iron Man Interface</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #fff; z-index: 10; pointer-events: none; }
-        .hud { border-left: 4px solid #ff0055; padding-left: 15px; background: rgba(255, 0, 85, 0.1); }
-        #video-preview { position: absolute; bottom: 20px; right: 20px; width: 120px; border-radius: 50%; transform: scaleX(-1); border: 2px solid #ff0055; opacity: 0.6; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Orbitron', sans-serif; }
+        #status-ui { 
+            position: absolute; top: 30px; left: 30px; 
+            padding: 10px 20px; border-radius: 5px;
+            font-weight: bold; font-size: 18px; letter-spacing: 2px;
+            transition: all 0.3s ease;
+            z-index: 100;
+        }
+        .detected { color: #00ffff; border: 1px solid #00ffff; background: rgba(0, 255, 255, 0.1); box-shadow: 0 0 15px #00ffff; }
+        .not-detected { color: #ff3300; border: 1px solid #ff3300; background: rgba(255, 51, 0, 0.1); }
+        #video-preview { position: absolute; bottom: 20px; right: 20px; width: 120px; border-radius: 10px; transform: scaleX(-1); border: 1px solid #00ffff; opacity: 0.3; }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
 </head>
 <body>
 
-    <div id="ui">
-        <div class="hud">
-            <div id="status" style="font-size: 22px; font-weight: bold; color: #ff0055;">SYSTEM BOOTING...</div>
-            <div style="font-size: 12px; color: #aaa; margin-top: 5px;">
-                🤟 Cử chỉ LOVE: Hiện chữ I ❤️ U<br>
-                ✊ Nắm tay: Arc Reactor | ✌️ Chữ V: Trái Tim<br>
-                🖐️ Xòe/Khép: Zoom (Cái - Út)
-            </div>
-        </div>
-    </div>
-    
+    <div id="status-ui" class="not-detected">CHƯA NHẬN DIỆN TAY</div>
     <video id="video-preview" autoplay playsinline></video>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
@@ -31,41 +29,33 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script>
-        let scene, camera, renderer, particles, clock;
+        let scene, camera, renderer, particles;
         let currentMode = 'sphere', targetScale = 1.0, currentScale = 1.0;
-        const COUNT = 10000; // Tăng lượng hạt để chữ nét hơn
+        const COUNT = 10000;
         let followPoint = new THREE.Vector3();
 
-        // 1. TẠO TỌA ĐỘ CHỮ I LOVE YOU (Đơn giản hóa thành I ❤️ U cho nét)
+        // 1. TẠO TỌA ĐỘ HÌNH DẠNG
         function getShapeData() {
-            const data = { sphere: [], heart: [], loveText: [] };
+            const data = { sphere: [], loveText: [] };
             for (let i = 0; i < COUNT; i++) {
-                // Sphere
+                // Quả cầu (Sphere)
                 const phi = Math.acos(-1 + (2 * i) / COUNT);
                 const theta = Math.sqrt(COUNT * Math.PI) * phi;
                 data.sphere.push(200 * Math.cos(theta) * Math.sin(phi), 200 * Math.sin(theta) * Math.sin(phi), 200 * Math.cos(phi));
 
-                // Heart
-                const t = Math.random() * Math.PI * 2;
-                const xH = 16 * Math.pow(Math.sin(t), 3);
-                const yH = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
-                data.heart.push(xH * 15, yH * 15, (Math.random()-0.5)*40);
-
-                // I ❤️ U Matrix
+                // Chữ I LOVE YOU
                 let x, y, z = (Math.random()-0.5)*30;
                 const rand = Math.random();
-                if (rand < 0.2) { // Chữ I
-                    x = (Math.random()-0.5)*40 - 250;
-                    y = (Math.random()-0.5)*300;
-                } else if (rand < 0.7) { // Hình ❤️ chính giữa
-                    const t2 = Math.random() * Math.PI * 2;
-                    x = 16 * Math.pow(Math.sin(t2), 3) * 10;
-                    y = (13 * Math.cos(t2) - 5 * Math.cos(2*t2) - 2 * Math.cos(3*t2) - Math.cos(4*t2)) * 10;
-                } else { // Chữ U
+                if (rand < 0.15) { // I
+                    x = (Math.random()-0.5)*40 - 280; y = (Math.random()-0.5)*300;
+                } else if (rand < 0.5) { // LOVE
+                    const t = Math.random() * Math.PI * 2;
+                    x = (16 * Math.pow(Math.sin(t), 3) * 10);
+                    y = (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)) * 10;
+                } else { // YOU
                     const t3 = Math.PI + Math.random() * Math.PI;
-                    x = Math.cos(t3) * 100 + 250;
-                    y = Math.sin(t3) * 150 + 50;
-                    if (Math.random() > 0.8) { x = (Math.random() > 0.5 ? 150 : 350); y = Math.random()*150 + 50; } // Thành chữ U
+                    x = Math.cos(t3) * 100 + 280; y = Math.sin(t3) * 150 + 50;
+                    if (Math.random() > 0.8) { x = (Math.random() > 0.5 ? 180 : 380); y = Math.random()*150 + 50; }
                 }
                 data.loveText.push(x, y, z);
             }
@@ -77,7 +67,6 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 5000);
             camera.position.z = 1000;
-            clock = new THREE.Clock();
 
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -85,22 +74,16 @@
 
             const geo = new THREE.BufferGeometry();
             const positions = new Float32Array(COUNT * 3);
-            const colors = new Float32Array(COUNT * 3);
             const vels = new Float32Array(COUNT * 3);
 
             for(let i=0; i<COUNT; i++) {
                 positions[i*3] = SHAPES.sphere[i*3];
-                // Tạo màu ngẫu nhiên ban đầu
-                const color = new THREE.Color();
-                color.setHSL(Math.random(), 0.8, 0.5);
-                colors[i*3] = color.r; colors[i*3+1] = color.g; colors[i*3+2] = color.b;
             }
 
             geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             geo.setAttribute('velocity', new THREE.BufferAttribute(vels, 3));
 
-            const mat = new THREE.PointsMaterial({ size: 3, vertexColors: true, blending: THREE.AdditiveBlending, transparent: true });
+            const mat = new THREE.PointsMaterial({ color: 0x00ffff, size: 2.5, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.8 });
             particles = new THREE.Points(geo, mat);
             scene.add(particles);
         }
@@ -109,28 +92,31 @@
         hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
 
         hands.onResults((res) => {
+            const ui = document.getElementById('status-ui');
             if (res.multiHandLandmarks && res.multiHandLandmarks[0]) {
+                ui.innerText = "ĐÃ NHẬN DIỆN TAY";
+                ui.className = "detected";
+                
                 const m = res.multiHandLandmarks[0];
                 
-                // ZOOM (Cái - Út)
+                // Thu nhỏ / Phóng to
                 const zoomDist = Math.hypot(m[4].x - m[20].x, m[4].y - m[20].y);
                 targetScale = THREE.MathUtils.mapLinear(zoomDist, 0.1, 0.6, 0.4, 4.0);
 
-                // NHẬN DIỆN CỬ CHỈ
+                // Cử chỉ
                 const isIndex = m[8].y < m[6].y && m[12].y > m[10].y;
-                const isV = m[8].y < m[6].y && m[12].y < m[10].y && m[16].y > m[14].y;
                 const isFist = m[8].y > m[6].y && m[12].y > m[10].y;
-                // Cử chỉ ROCK / LOVE (🤟): Ngón cái, trỏ, út mở - Giữa, áp út đóng
                 const isLove = m[8].y < m[6].y && m[20].y < m[18].y && m[12].y > m[10].y && m[16].y > m[14].y;
 
-                const st = document.getElementById('status');
-                if (isLove) { currentMode = 'loveText'; st.innerText = "🤟 I LOVE YOU"; st.style.color = "#ff0055"; }
-                else if (isV) { currentMode = 'heart'; st.innerText = "❤️ HEART MODE"; st.style.color = "#ff3366"; }
-                else if (isFist) { currentMode = 'sphere'; st.innerText = "🔋 ARC REACTOR"; st.style.color = "#00ffff"; }
+                if (isLove) currentMode = 'loveText';
+                else if (isFist) currentMode = 'sphere';
                 else if (isIndex) { 
-                    currentMode = 'follow'; st.innerText = "🚀 TRACKING"; 
+                    currentMode = 'follow'; 
                     followPoint.x = (0.5 - m[8].x) * 1500; followPoint.y = (0.5 - m[8].y) * 1000;
                 }
+            } else {
+                ui.innerText = "CHƯA NHẬN DIỆN TAY";
+                ui.className = "not-detected";
             }
         });
 
@@ -141,38 +127,28 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            const time = clock.getElapsedTime();
             const p = particles.geometry.attributes.position.array;
-            const c = particles.geometry.attributes.color.array;
             const v = particles.geometry.attributes.velocity.array;
             const target = SHAPES[currentMode === 'follow' ? 'sphere' : currentMode];
-
+            
             currentScale = THREE.MathUtils.lerp(currentScale, targetScale, 0.1);
 
             for (let i = 0; i < COUNT; i++) {
                 const i3 = i * 3;
-                
-                // 1. CẬP NHẬT MÀU SẮC (Cầu vồng thay đổi theo thời gian)
-                const hue = (Math.sin(time * 0.5 + i * 0.001) + 1) / 2;
-                const color = new THREE.Color().setHSL(hue, 0.8, 0.6);
-                c[i3] = color.r; c[i3+1] = color.g; c[i3+2] = color.b;
-
-                // 2. CẬP NHẬT VỊ TRÍ
                 if (currentMode === 'follow') {
-                    v[i3] += (followPoint.x - p[i3]) * 0.04 + (Math.random()-0.5)*10;
-                    v[i3+1] += (followPoint.y - p[i3+1]) * 0.04 + (Math.random()-0.5)*10;
+                    const speed = 0.05;
+                    v[i3] += (followPoint.x - p[i3]) * speed + (Math.random()-0.5)*15;
+                    v[i3+1] += (followPoint.y - p[i3+1]) * speed + (Math.random()-0.5)*15;
                 } else {
-                    p[i3] += (target[i3] * currentScale - p[i3]) * 0.12;
-                    p[i3+1] += (target[i3+1] * currentScale - p[i3+1]) * 0.12;
-                    p[i3+2] += (target[i3+2] * currentScale - p[i3+2]) * 0.12;
+                    p[i3] += (target[i3] * currentScale - p[i3]) * 0.15;
+                    p[i3+1] += (target[i3+1] * currentScale - p[i3+1]) * 0.15;
+                    p[i3+2] += (target[i3+2] * currentScale - p[i3+2]) * 0.15;
                 }
                 p[i3] += v[i3]; p[i3+1] += v[i3+1];
-                v[i3] *= 0.85; v[i3+1] *= 0.85;
+                v[i3] *= 0.8; v[i3+1] *= 0.8;
             }
-
             particles.geometry.attributes.position.needsUpdate = true;
-            particles.geometry.attributes.color.needsUpdate = true;
-            particles.rotation.y += 0.003;
+            particles.rotation.y += 0.005;
             renderer.render(scene, camera);
         }
 
